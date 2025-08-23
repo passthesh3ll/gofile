@@ -14,7 +14,7 @@ A python Gofile client. You can upload files or entire folders to Gofile, provid
 pip install requests requests-toolbelt tqdm colorama
 ```
 
-## Usage Example
+## Example
 
 Upload a file or a folder:
 
@@ -28,11 +28,7 @@ python gofile.py /path/to/dir/
 ```
 ![image](https://i.postimg.cc/jSrMxCsx/1.png)
 
-Save the upload links to text file/s (`--log` option):
-
-```bash
-python gofile.py /path/to/file.txt --log
-```
+## Help
 
 ```bash
 usage: gofile.py [-h] [--log] path
