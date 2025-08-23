@@ -16,12 +16,14 @@ pip install requests requests-toolbelt tqdm colorama
 
 ## Example
 
-Upload a file or a folder:
+Upload a file:
 
 ```bash
 python gofile.py /path/to/file.txt
 ```
 ![image](https://i.postimg.cc/zv23dy0n/2.png)
+
+Upload a folder:
 
 ```bash
 python gofile.py /path/to/dir/
