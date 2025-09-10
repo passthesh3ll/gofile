@@ -21,7 +21,7 @@ Upload a file:
 ```bash
 python gofile.py /path/to/file.txt
 ```
-![image](https://i.postimg.cc/zv23dy0n/2.png)
+![image](https://i.postimg.cc/Mp5MLzRm/image.png)
 
 Upload a folder:
 
