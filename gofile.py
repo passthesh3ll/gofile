@@ -126,11 +126,11 @@ if __name__ == "__main__":
 
     # Folder upload
     elif os.path.isdir(args.path):
-        files = [
+        files = sorted([
             os.path.join(args.path, f)
             for f in os.listdir(args.path)
             if os.path.isfile(os.path.join(args.path, f))
-        ]
+        ], key=lambda x: os.path.basename(x).lower())
         total_files = len(files)
         
         for index, file_path in enumerate(files, 1):
