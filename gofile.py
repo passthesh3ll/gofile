@@ -9,18 +9,18 @@ init()
 def upload_file(file_path, file_index=None, total_files=None):
     # Check existence
     if not os.path.isfile(file_path):
-        print(f"{Fore.RED}Error: File '{file_path}' does not exist{Style.RESET_ALL}")
+        print(f"{Fore.RED}[!] error: '{file_path}' missing file{Style.RESET_ALL}")
         return None
     
     try:
         file_size = os.path.getsize(file_path)
         if file_size == 0:
-            print(f"{Fore.RED}Error: File is empty{Style.RESET_ALL}")
+            print(f"{Fore.RED}[!] error: empty file{Style.RESET_ALL}")
             return None
         
         # File index display for folder mode
         if file_index is not None and total_files is not None:
-            print(f"{Fore.BLUE}-> [{file_index}/{total_files}] {os.path.basename(file_path)}{Style.RESET_ALL}")
+            print(f"{Fore.BLUE}[>] [{file_index}/{total_files}] {os.path.basename(file_path)}{Style.RESET_ALL}")
         
         # Prepare streamed upload
         encoder = MultipartEncoder(
@@ -28,7 +28,7 @@ def upload_file(file_path, file_index=None, total_files=None):
         )
         
         # Progress bar
-        pbar = tqdm(total=file_size, unit='B', unit_scale=True, desc=f"{Fore.YELLOW}Uploading{Style.RESET_ALL}", ascii=True, leave=True)
+        pbar = tqdm(total=file_size, unit='B', unit_scale=True, desc=f"{Fore.YELLOW}[>] uploading{Style.RESET_ALL}", ascii=True, leave=True)
         
         def update_progress(monitor):
             pbar.update(monitor.bytes_read - pbar.n)
@@ -51,7 +51,7 @@ def upload_file(file_path, file_index=None, total_files=None):
             data = response.json()
             if data['status'] == 'ok':
                 download_link = data['data']['downloadPage']
-                print(f"{Fore.GREEN}{download_link}{Style.RESET_ALL}\n")
+                print(f"{Fore.GREEN}[+] link: {download_link}{Style.RESET_ALL}")
                 
                 # Optional link logging
                 if args.log:
@@ -62,19 +62,18 @@ def upload_file(file_path, file_index=None, total_files=None):
                         with open(log_file_path, 'w', encoding='utf-8') as log_file:
                             log_file.write(f"{download_link}\n")
                     except Exception as e:
-                        print(f"{Fore.RED}Error saving link to file: {str(e)}{Style.RESET_ALL}")
+                        print(f"{Fore.RED}[!] error saving link to file: {str(e)}{Style.RESET_ALL}")
                 
                 return {'link': download_link, 'filename': os.path.basename(file_path)}
             else:
-                print(f"Upload failed: {data.get('message', 'Unknown error')}")
+                print(f"{Fore.RED}[!] error upload failed: {data.get('message', 'Unknown error')}")
                 return None
         else:
-            print(f"Upload failed with status code: {response.status_code}")
-            print(f"Response: {response.text}")
+            print(f"{Fore.RED}[!] error upload failed {response.status_code}: {response.text}")
             return None
                 
     except Exception as e:
-        print(f"{Fore.RED}Error during upload: {str(e)}{Style.RESET_ALL}")
+        print(f"{Fore.RED}[!] error {str(e)}{Style.RESET_ALL}")
         return None
 
     finally:
@@ -95,7 +94,7 @@ def upload_with_retries(path, file_index=None, total_files=None):
         
         # Retry delay
         if attempt < max_attempts:
-            print(f"{Fore.RED}Upload failed. Retrying in 5 minutes... (attempt {attempt}/{max_attempts - 1}){Style.RESET_ALL}")
+            print(f"{Fore.RED}[!] error upload failed, retrying in 5min.. [{attempt}/{max_attempts - 1}]{Style.RESET_ALL}")
             time.sleep(5 * 60)
 
     return None
@@ -141,15 +140,15 @@ if __name__ == "__main__":
 
             # Wait between uploads
             if index < total_files:
-                print(f"{Fore.CYAN}Waiting {args.wait} minutes before next upload...{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}[>] waiting {args.wait}min..{Style.RESET_ALL}")
                 time.sleep(args.wait * 60)
 
     else:
-        print(f"{Fore.RED}Error: '{args.path}' is neither a file nor a directory{Style.RESET_ALL}")
+        print(f"{Fore.RED}[!] error '{args.path}' invalid path{Style.RESET_ALL}")
         sys.exit(1)
     
     # Summary output
     if upload_results:
-        print(f"{Fore.YELLOW}--- Uploaded files ---{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW} -- [results] -- {Style.RESET_ALL}")
         for result in upload_results:
-            print(f"{Fore.GREEN}{result['link']}{Style.RESET_ALL} {Fore.BLUE}{result['filename']}{Style.RESET_ALL}")
+            print(f"[+] {Fore.GREEN}{result['link']}{Style.RESET_ALL} {Fore.BLUE}{result['filename']}{Style.RESET_ALL}")
