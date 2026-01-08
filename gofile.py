@@ -28,7 +28,7 @@ def upload_file(file_path, file_index=None, total_files=None):
         )
         
         # Progress bar
-        pbar = tqdm(total=file_size, unit='B', unit_scale=True, desc=f"{Fore.YELLOW}[>] uploading{Style.RESET_ALL}", ascii=True, leave=True)
+        pbar = tqdm(total=file_size, unit='B', unit_scale=True, desc=f"{Fore.YELLOW}[>] uploading{Style.RESET_ALL}", leave=True)
         
         def update_progress(monitor):
             pbar.update(monitor.bytes_read - pbar.n)
@@ -110,8 +110,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--wait",
         type=int,
-        default=1,
-        help="Minutes to wait between uploads when uploading multiple files (default: 1 minute)"
+        default=3,
+        help="Minutes to wait between uploads when uploading multiple files (default: 3min)"
     )
 
     args = parser.parse_args()
