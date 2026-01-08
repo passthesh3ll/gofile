@@ -140,7 +140,7 @@ if __name__ == "__main__":
 
             # Wait between uploads
             if index < total_files:
-                print(f"{Fore.CYAN}[>] waiting {args.wait}min..{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}[>] waiting {args.wait}min..{Style.RESET_ALL}")
                 time.sleep(args.wait * 60)
 
     else:
