@@ -151,4 +151,4 @@ if __name__ == "__main__":
     if upload_results:
         print(f"{Fore.YELLOW} -- [results] -- {Style.RESET_ALL}")
         for result in upload_results:
-            print(f"[+] {Fore.GREEN}{result['link']}{Style.RESET_ALL} {Fore.BLUE}{result['filename']}{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}[+] {result['link']}{Style.RESET_ALL} {Fore.BLUE}{result['filename']}{Style.RESET_ALL}")
