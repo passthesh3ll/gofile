@@ -66,7 +66,7 @@ def upload_file(file_path, file_index=None, total_files=None):
                 
                 return {'link': download_link, 'filename': os.path.basename(file_path)}
             else:
-                print(f"{Fore.RED}[!] error upload failed: {data.get('message', 'Unknown error')}")
+                print(f"{Fore.RED}[!] error upload failed: {data.get('message', 'unknown error').strip()}")
                 return None
         else:
             print(f"{Fore.RED}[!] error upload failed {response.status_code}: {response.text}")
@@ -102,16 +102,16 @@ def upload_with_retries(path, file_index=None, total_files=None):
 
 if __name__ == "__main__":
     # CLI arguments
-    parser = argparse.ArgumentParser(description="Upload files or folders to Gofile")
-    parser.add_argument("path", help="Path to the file or folder to upload")
-    parser.add_argument("--log", action="store_true", help="Save upload links to individual <filename>_links.txt files")
+    parser = argparse.ArgumentParser(description="upload files or folders to Gofile")
+    parser.add_argument("path", help="path to the file or folder to upload")
+    parser.add_argument("--log", action="store_true", help="save upload links to individual <filename>_links.txt files")
 
     # Delay between multi-file uploads
     parser.add_argument(
         "--wait",
         type=int,
-        default=3,
-        help="Minutes to wait between uploads when uploading multiple files (default: 3min)"
+        default=5,
+        help="minutes to wait between uploads (default: 5min)"
     )
 
     args = parser.parse_args()
