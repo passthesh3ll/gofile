@@ -6,7 +6,7 @@ from colorama import init, Fore, Style
 # Initialize colored output
 init()
 
-def upload_file(file_path, file_index=None, total_files=None):
+def upload_file(file_path, file_index=None, total_files=None, proxies=None):
     # Check existence
     if not os.path.isfile(file_path):
         print(f"{Fore.RED}[!] error: '{file_path}' missing file{Style.RESET_ALL}")
@@ -40,7 +40,8 @@ def upload_file(file_path, file_index=None, total_files=None):
         response = requests.post(
             'https://upload.gofile.io/uploadfile',
             data=progress_encoder,
-            headers={'Content-Type': encoder.content_type}
+            headers={'Content-Type': encoder.content_type},
+            proxies=proxies
         )
         
         pbar.close()
@@ -84,11 +85,11 @@ def upload_file(file_path, file_index=None, total_files=None):
                     field[1].close()
 
 
-def upload_with_retries(path, file_index=None, total_files=None):
+def upload_with_retries(path, file_index=None, total_files=None, proxies=None):
     # Retry mechanism (3 attempts total)
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
-        result = upload_file(path, file_index, total_files)
+        result = upload_file(path, file_index, total_files, proxies=proxies)
         if result is not None:
             return result
         
@@ -113,14 +114,31 @@ if __name__ == "__main__":
         default=5,
         help="minutes to wait between uploads (default: 5min)"
     )
+    
+    parser.add_argument(
+        "--proxy",
+        nargs='?',
+        const='socks5://127.0.0.1:9050',
+        default=None,
+        help="use proxy (default if empty: socks5://127.0.0.1:9050, or specify custom proxy URL)"
+    )
 
     args = parser.parse_args()
+    
+    # Configure proxies
+    proxies = None
+    if args.proxy is not None:
+        proxies = {
+            'http': args.proxy,
+            'https': args.proxy
+        }
+        print(f"{Fore.CYAN}[>] using proxy: {args.proxy}{Style.RESET_ALL}")
     
     upload_results = []
     
     # Single file
     if os.path.isfile(args.path):
-        result = upload_with_retries(args.path)
+        result = upload_with_retries(args.path, proxies=proxies)
         if result:
             upload_results.append(result)
 
@@ -134,7 +152,7 @@ if __name__ == "__main__":
         total_files = len(files)
         
         for index, file_path in enumerate(files, 1):
-            result = upload_with_retries(file_path, index, total_files)
+            result = upload_with_retries(file_path, index, total_files, proxies=proxies)
             if result:
                 upload_results.append(result)
 

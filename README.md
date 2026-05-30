@@ -35,16 +35,18 @@ python gofile.py /path/to/dir/
 
 ## Help
 
-```bash
-usage: gofile.py [-h] [--log] [--wait WAIT] path
+```
+usage: gofile.py [-h] [--log] [--wait WAIT] [--proxy [PROXY]] path
 
 upload files or folders to Gofile
 
 positional arguments:
-  path         path to the file or folder to upload
+  path             path to the file or folder to upload
 
 options:
-  -h, --help   show this help message and exit
-  --log        save upload links to individual <filename>_links.txt files
-  --wait WAIT  minutes to wait between uploads (default: 3min)
+  -h, --help       show this help message and exit
+  --log            save upload links to individual <filename>_links.txt files
+  --wait WAIT      minutes to wait between uploads (default: 5min)
+  --proxy [PROXY]  use proxy (default if empty: socks5://127.0.0.1:9050, or specify
+                   custom proxy URL)
 ```
