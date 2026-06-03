@@ -6,19 +6,19 @@ import time
 import tempfile
 import json
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+import threading
 from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
 from tqdm import tqdm
 from colorama import init, Fore, Style
 
-# Initialize colored output
 init()
 
-# Cache configuration
-CACHE_MAX_AGE = 3600  # 60 minutes
+CACHE_MAX_AGE = 3600
 
 
 def get_cache_file(proxy_key=None):
-    """Get appropriate cache file path based on proxy."""
     temp_dir = tempfile.gettempdir()
     if proxy_key:
         key_hash = hashlib.md5(proxy_key.encode()).hexdigest()[:8]
@@ -27,7 +27,6 @@ def get_cache_file(proxy_key=None):
 
 
 def get_cached_server(proxy_key=None):
-    """Return cached server name if valid (< 60min), else None."""
     cache_file = get_cache_file(proxy_key)
     try:
         if os.path.exists(cache_file):
@@ -41,7 +40,6 @@ def get_cached_server(proxy_key=None):
 
 
 def save_server(server_name, proxy_key=None):
-    """Save server name to cache with current timestamp."""
     cache_file = get_cache_file(proxy_key)
     try:
         with open(cache_file, 'w') as f:
@@ -54,7 +52,6 @@ def save_server(server_name, proxy_key=None):
 
 
 def invalidate_cache(proxy_key=None):
-    """Remove cache file."""
     try:
         cache_file = get_cache_file(proxy_key)
         if os.path.exists(cache_file):
@@ -64,7 +61,6 @@ def invalidate_cache(proxy_key=None):
 
 
 def get_upload_server(proxies=None):
-    """Fetch available upload server from GoFile API."""
     proxy_key = proxies.get('http') if proxies else None
     
     cached = get_cached_server(proxy_key)
@@ -78,36 +74,53 @@ def get_upload_server(proxies=None):
             proxies=proxies
         )
         if response.status_code != 200:
-            print(f"{Fore.RED}[!] error: failed to get server list (status {response.status_code}){Style.RESET_ALL}")
+            tqdm.write(f"{Fore.RED}[!] error: failed to get server list (status {response.status_code}){Style.RESET_ALL}")
             return None
             
         data = response.json()
         if data.get('status') != 'ok':
-            print(f"{Fore.RED}[!] error: invalid server response{Style.RESET_ALL}")
+            tqdm.write(f"{Fore.RED}[!] error: invalid server response{Style.RESET_ALL}")
             return None
             
         servers = data.get('data', {}).get('servers', [])
         if not servers:
-            print(f"{Fore.RED}[!] error: no servers available{Style.RESET_ALL}")
+            tqdm.write(f"{Fore.RED}[!] error: no servers available{Style.RESET_ALL}")
             return None
         
         server_name = servers[0].get('name') if isinstance(servers[0], dict) else servers[0]
         if not server_name:
-            print(f"{Fore.RED}[!] error: invalid server data{Style.RESET_ALL}")
+            tqdm.write(f"{Fore.RED}[!] error: invalid server data{Style.RESET_ALL}")
             return None
             
         save_server(server_name, proxy_key)
         return server_name
         
     except Exception as e:
-        print(f"{Fore.RED}[!] error getting server: {str(e)}{Style.RESET_ALL}")
+        tqdm.write(f"{Fore.RED}[!] error getting server: {str(e)}{Style.RESET_ALL}")
         return None
 
 
-def upload_file(file_path, file_index=None, total_files=None, proxies=None, log_path=None):
-    """Upload a single file to Gofile with progress tracking."""
+class PositionManager:
+    """Manages tqdm positions for parallel uploads."""
+    def __init__(self, max_positions):
+        self.queue = Queue()
+        for i in range(max_positions):
+            self.queue.put(i)
+    
+    def acquire(self):
+        return self.queue.get()
+    
+    def release(self, position):
+        self.queue.put(position)
+
+
+def upload_file_worker(file_path, file_index, total_files, proxies, position, is_parallel=False):
+    """
+    Upload worker with position-aware progress bar.
+    Uses tqdm.write for all output to prevent breaking bars.
+    """
     if not os.path.isfile(file_path):
-        print(f"{Fore.RED}[!] error: '{file_path}' missing file{Style.RESET_ALL}")
+        tqdm.write(f"{Fore.RED}[!] error: '{file_path}' missing file{Style.RESET_ALL}")
         return None
     
     file_handle = None
@@ -116,18 +129,17 @@ def upload_file(file_path, file_index=None, total_files=None, proxies=None, log_
     try:
         file_size = os.path.getsize(file_path)
         if file_size == 0:
-            print(f"{Fore.RED}[!] error: empty file{Style.RESET_ALL}")
+            tqdm.write(f"{Fore.RED}[!] error: empty file{Style.RESET_ALL}")
             return None
         
-        if file_index is not None and total_files is not None:
-            print(f"{Fore.BLUE}[>] [{file_index}/{total_files}] {os.path.basename(file_path)}{Style.RESET_ALL}")
+        # Header line always printed (with file index)
+        tqdm.write(f"{Fore.BLUE}[>] [{file_index}/{total_files}] {os.path.basename(file_path)}{Style.RESET_ALL}")
         
         server = get_upload_server(proxies)
         if not server:
             return None
             
         upload_url = f"https://{server}.gofile.io/uploadfile"
-        
         filename = os.path.basename(file_path)
         file_handle = open(file_path, 'rb')
         
@@ -135,12 +147,22 @@ def upload_file(file_path, file_index=None, total_files=None, proxies=None, log_
             fields={'file': (filename, file_handle, 'application/octet-stream')}
         )
         
+        # In parallel mode, add counter to progress bar description
+        if is_parallel:
+            desc_text = f"{Fore.YELLOW}[>] [{file_index}/{total_files}] uploading{Style.RESET_ALL}"
+        else:
+            desc_text = f"{Fore.YELLOW}[>] uploading{Style.RESET_ALL}"
+        
+        # Progress bar with fixed position; leave=False removes it when done
         pbar = tqdm(
             total=file_size, 
             unit='B', 
             unit_scale=True, 
-            desc=f"{Fore.YELLOW}[>] uploading{Style.RESET_ALL}", 
-            leave=True
+            desc=desc_text, 
+            leave=False,
+            position=position,
+            file=sys.stdout,
+            dynamic_ncols=True
         )
         
         def update_progress(monitor):
@@ -164,27 +186,25 @@ def upload_file(file_path, file_index=None, total_files=None, proxies=None, log_
             data = response.json()
             if data.get('status') == 'ok':
                 download_link = data['data']['downloadPage']
-                print(f"{Fore.GREEN}[+] link: {download_link} ({elapsed_time:.1f}s){Style.RESET_ALL}")
                 
-                if log_path:
-                    try:
-                        with open(log_path, 'a', encoding='utf-8') as log_file:
-                            log_file.write(f"{download_link}\n")
-                    except Exception as e:
-                        print(f"{Fore.RED}[!] error saving link: {str(e)}{Style.RESET_ALL}")
+                # In parallel mode, add counter before link
+                if is_parallel:
+                    tqdm.write(f"{Fore.GREEN}[+] [{file_index}/{total_files}] link: {download_link} ({elapsed_time:.1f}s){Style.RESET_ALL}")
+                else:
+                    tqdm.write(f"{Fore.GREEN}[+] link: {download_link} ({elapsed_time:.1f}s){Style.RESET_ALL}")
                 
-                return {'link': download_link, 'filename': filename}
+                return {'link': download_link, 'filename': filename, 'path': file_path}
             else:
-                print(f"{Fore.RED}[!] error: upload rejected: {data.get('message', 'unknown')}{Style.RESET_ALL}")
+                tqdm.write(f"{Fore.RED}[!] error: upload rejected: {data.get('message', 'unknown')}{Style.RESET_ALL}")
                 invalidate_cache(proxy_key)
                 return None
         else:
-            print(f"{Fore.RED}[!] error HTTP {response.status_code}: {response.text[:200]}{Style.RESET_ALL}")
+            tqdm.write(f"{Fore.RED}[!] error HTTP {response.status_code}: {response.text[:200]}{Style.RESET_ALL}")
             invalidate_cache(proxy_key)
             return None
                 
     except Exception as e:
-        print(f"{Fore.RED}[!] error: {str(e)}{Style.RESET_ALL}")
+        tqdm.write(f"{Fore.RED}[!] error: {str(e)}{Style.RESET_ALL}")
         invalidate_cache(proxy_key)
         return None
         
@@ -193,42 +213,88 @@ def upload_file(file_path, file_index=None, total_files=None, proxies=None, log_
             file_handle.close()
 
 
-def upload_with_retries(path, file_index=None, total_files=None, proxies=None, log_path=None):
-    """Retry mechanism (3 attempts total)."""
+def upload_with_retries_parallel(path, file_index, total_files, proxies, position, is_parallel=False):
+    """Retry mechanism for parallel uploads."""
     max_attempts = 3
     proxy_key = proxies.get('http') if proxies else None
     
     for attempt in range(1, max_attempts + 1):
-        result = upload_file(path, file_index, total_files, proxies=proxies, log_path=log_path)
+        result = upload_file_worker(path, file_index, total_files, proxies, position, is_parallel)
         if result is not None:
             return result
         
         if attempt < max_attempts:
             invalidate_cache(proxy_key)
-            print(f"{Fore.RED}[!] retry in 10s.. [{attempt}/{max_attempts - 1}]{Style.RESET_ALL}")
+            tqdm.write(f"{Fore.RED}[!] retry in 10s.. [{attempt}/{max_attempts - 1}]{Style.RESET_ALL}")
             time.sleep(10)
 
     return None
+
+
+def parallel_upload(files, parallel, wait_time, proxies):
+    """
+    Execute parallel uploads with dynamic position management.
+    Completed bars disappear (leave=False) and positions are recycled.
+    """
+    if not files:
+        return []
+    
+    position_manager = PositionManager(parallel)
+    results = []
+    results_lock = threading.Lock()
+    
+    def worker(args):
+        idx, file_path = args
+        position = position_manager.acquire()
+        try:
+            result = upload_with_retries_parallel(file_path, idx, len(files), proxies, position, is_parallel=True)
+            if result:
+                with results_lock:
+                    results.append(result)
+            
+            # Optional delay between uploads (per worker)
+            if wait_time > 0 and idx < len(files):
+                time.sleep(wait_time)
+            return result
+        finally:
+            position_manager.release(position)
+    
+    print(f"{Fore.CYAN}[>] starting {len(files)} uploads with {parallel} workers{Style.RESET_ALL}\n")
+    
+    with ThreadPoolExecutor(max_workers=parallel) as executor:
+        futures = {executor.submit(worker, (i+1, f)): (i+1, f) for i, f in enumerate(files)}
+        
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                tqdm.write(f"{Fore.RED}[!] worker error: {e}{Style.RESET_ALL}")
+    
+    return results
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="upload files or folders to Gofile")
     parser.add_argument("path", help="path to the file or folder to upload")
     parser.add_argument("--log", action="store_true", help="save upload links to _links.txt file")
-
     parser.add_argument(
         "--wait",
         type=int,
         default=5,
         help="seconds to wait between uploads (default: 5sec)"
     )
-    
     parser.add_argument(
         "--proxy",
         nargs='?',
         const='socks5://127.0.0.1:9050',
         default=None,
         help="use proxy (default if empty: socks5://127.0.0.1:9050, or specify custom proxy URL)"
+    )
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=1,
+        help="number of parallel uploads (default: 1)"
     )
 
     args = parser.parse_args()
@@ -239,11 +305,11 @@ if __name__ == "__main__":
         print(f"{Fore.CYAN}[>] using proxy: {args.proxy}{Style.RESET_ALL}")
     
     upload_results = []
-    total_files = 0
+    total_files_count = 0
     
-    # Single file mode
+    # Single file mode - parallel ignored (no benefit)
     if os.path.isfile(args.path):
-        total_files = 1
+        total_files_count = 1
         
         single_log_path = None
         if args.log:
@@ -254,46 +320,59 @@ if __name__ == "__main__":
                 f"{os.path.splitext(filename)[0]}_links.txt"
             )
         
-        result = upload_with_retries(args.path, proxies=proxies, log_path=single_log_path)
+        # Sequential mode (is_parallel=False)
+        result = upload_with_retries_parallel(args.path, 1, 1, proxies, 0, is_parallel=False)
         if result:
             upload_results.append(result)
+            
+            if single_log_path:
+                try:
+                    with open(single_log_path, 'a', encoding='utf-8') as log_file:
+                        log_file.write(f"{result['link']}\n")
+                except Exception as e:
+                    print(f"{Fore.RED}[!] error saving link: {str(e)}{Style.RESET_ALL}")
 
-    # Folder mode
+    # Folder mode - supports parallel processing
     elif os.path.isdir(args.path):
         files = sorted([
             os.path.join(args.path, f)
             for f in os.listdir(args.path)
             if os.path.isfile(os.path.join(args.path, f))
         ], key=lambda x: os.path.basename(x).lower())
-        total_files = len(files)
+        total_files_count = len(files)
         
-        for index, file_path in enumerate(files, 1):
-            result = upload_with_retries(file_path, index, total_files, proxies=proxies, log_path=None)
-            if result:
-                upload_results.append(result)
-
-            if index < total_files:
-                print(f"{Fore.YELLOW}[>] waiting {args.wait}s..{Style.RESET_ALL}")
-                time.sleep(args.wait)
+        if not files:
+            print(f"{Fore.RED}[!] error: no files in folder{Style.RESET_ALL}")
+            sys.exit(1)
         
-        # Create single log file for folder with format: link - filename
+        if args.parallel > 1:
+            # Parallel processing with position recycling and counter in desc
+            upload_results = parallel_upload(files, args.parallel, args.wait, proxies)
+        else:
+            # Sequential processing (original behavior, no counter in desc)
+            for index, file_path in enumerate(files, 1):
+                result = upload_with_retries_parallel(file_path, index, len(files), proxies, 0, is_parallel=False)
+                if result:
+                    upload_results.append(result)
+                if index < len(files) and args.wait > 0:
+                    print(f"{Fore.YELLOW}[>] waiting {args.wait}s..{Style.RESET_ALL}")
+                    time.sleep(args.wait)
+        
+        # Create log file for folder
         if args.log and upload_results:
-            # Get actual folder name from path (handles ./folder, /path/to/folder, .)
             folder_path = os.path.normpath(args.path)
             folder_name = os.path.basename(folder_path)
-            
-            # Handle case where path is '.' or ends with separator
             if not folder_name or folder_name == '.':
                 folder_name = os.path.basename(os.getcwd())
             
             parent_dir = os.path.dirname(folder_path) if os.path.dirname(folder_path) else '.'
-            
             folder_log_path = os.path.join(parent_dir, f"{folder_name}_links.txt")
             
             try:
                 with open(folder_log_path, 'w', encoding='utf-8') as log_file:
                     for result in upload_results:
                         log_file.write(f"{result['link']} - {result['filename']}\n")
+                print(f"{Fore.CYAN}[>] saved {len(upload_results)} links to: {folder_log_path}{Style.RESET_ALL}")
             except Exception as e:
                 print(f"{Fore.RED}[!] error saving links file: {str(e)}{Style.RESET_ALL}")
 
@@ -301,7 +380,11 @@ if __name__ == "__main__":
         print(f"{Fore.RED}[!] error: '{args.path}' invalid path{Style.RESET_ALL}")
         sys.exit(1)
     
+    # Final summary
     if upload_results:
-        print(f"\n{Fore.YELLOW}[>] uploads finished ({len(upload_results)}/{total_files}){Style.RESET_ALL}")
+        print(f"\n{Fore.YELLOW}[>] uploads finished ({len(upload_results)}/{total_files_count}){Style.RESET_ALL}")
         for result in upload_results:
             print(f"{Fore.GREEN}[+] {result['link']}{Style.RESET_ALL} - {Fore.BLUE}{result['filename']}{Style.RESET_ALL}")
+    else:
+        print(f"\n{Fore.RED}[!] no uploads completed successfully{Style.RESET_ALL}")
+        sys.exit(1)
