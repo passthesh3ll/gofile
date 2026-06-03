@@ -67,12 +67,10 @@ def get_upload_server(proxies=None):
     """Fetch available upload server from GoFile API."""
     proxy_key = proxies.get('http') if proxies else None
     
-    # Try cache first (silent)
     cached = get_cached_server(proxy_key)
     if cached:
         return cached
     
-    # Fetch new server
     try:
         response = requests.get(
             'https://api.gofile.io/servers', 
@@ -93,7 +91,6 @@ def get_upload_server(proxies=None):
             print(f"{Fore.RED}[!] error: no servers available{Style.RESET_ALL}")
             return None
         
-        # Extract server name from first available server
         server_name = servers[0].get('name') if isinstance(servers[0], dict) else servers[0]
         if not server_name:
             print(f"{Fore.RED}[!] error: invalid server data{Style.RESET_ALL}")
@@ -107,7 +104,7 @@ def get_upload_server(proxies=None):
         return None
 
 
-def upload_file(file_path, file_index=None, total_files=None, proxies=None):
+def upload_file(file_path, file_index=None, total_files=None, proxies=None, log_path=None):
     """Upload a single file to Gofile with progress tracking."""
     if not os.path.isfile(file_path):
         print(f"{Fore.RED}[!] error: '{file_path}' missing file{Style.RESET_ALL}")
@@ -125,7 +122,6 @@ def upload_file(file_path, file_index=None, total_files=None, proxies=None):
         if file_index is not None and total_files is not None:
             print(f"{Fore.BLUE}[>] [{file_index}/{total_files}] {os.path.basename(file_path)}{Style.RESET_ALL}")
         
-        # Get upload server
         server = get_upload_server(proxies)
         if not server:
             return None
@@ -164,21 +160,15 @@ def upload_file(file_path, file_index=None, total_files=None, proxies=None):
         pbar.close()
         elapsed_time = time.time() - start_time
         
-        # Interpret response
         if response.status_code == 200:
             data = response.json()
             if data.get('status') == 'ok':
                 download_link = data['data']['downloadPage']
                 print(f"{Fore.GREEN}[+] link: {download_link} ({elapsed_time:.1f}s){Style.RESET_ALL}")
                 
-                if args.log:
-                    output_dir = os.path.dirname(file_path)
-                    log_file_path = os.path.join(
-                        output_dir if output_dir else '.', 
-                        f"{os.path.splitext(filename)[0]}_links.txt"
-                    )
+                if log_path:
                     try:
-                        with open(log_file_path, 'a', encoding='utf-8') as log_file:
+                        with open(log_path, 'a', encoding='utf-8') as log_file:
                             log_file.write(f"{download_link}\n")
                     except Exception as e:
                         print(f"{Fore.RED}[!] error saving link: {str(e)}{Style.RESET_ALL}")
@@ -203,13 +193,13 @@ def upload_file(file_path, file_index=None, total_files=None, proxies=None):
             file_handle.close()
 
 
-def upload_with_retries(path, file_index=None, total_files=None, proxies=None):
+def upload_with_retries(path, file_index=None, total_files=None, proxies=None, log_path=None):
     """Retry mechanism (3 attempts total)."""
     max_attempts = 3
     proxy_key = proxies.get('http') if proxies else None
     
     for attempt in range(1, max_attempts + 1):
-        result = upload_file(path, file_index, total_files, proxies=proxies)
+        result = upload_file(path, file_index, total_files, proxies=proxies, log_path=log_path)
         if result is not None:
             return result
         
@@ -224,7 +214,7 @@ def upload_with_retries(path, file_index=None, total_files=None, proxies=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="upload files or folders to Gofile")
     parser.add_argument("path", help="path to the file or folder to upload")
-    parser.add_argument("--log", action="store_true", help="save upload links to individual <filename>_links.txt files")
+    parser.add_argument("--log", action="store_true", help="save upload links to _links.txt file")
 
     parser.add_argument(
         "--wait",
@@ -251,12 +241,24 @@ if __name__ == "__main__":
     upload_results = []
     total_files = 0
     
+    # Single file mode
     if os.path.isfile(args.path):
         total_files = 1
-        result = upload_with_retries(args.path, proxies=proxies)
+        
+        single_log_path = None
+        if args.log:
+            output_dir = os.path.dirname(args.path)
+            filename = os.path.basename(args.path)
+            single_log_path = os.path.join(
+                output_dir if output_dir else '.', 
+                f"{os.path.splitext(filename)[0]}_links.txt"
+            )
+        
+        result = upload_with_retries(args.path, proxies=proxies, log_path=single_log_path)
         if result:
             upload_results.append(result)
 
+    # Folder mode
     elif os.path.isdir(args.path):
         files = sorted([
             os.path.join(args.path, f)
@@ -266,13 +268,34 @@ if __name__ == "__main__":
         total_files = len(files)
         
         for index, file_path in enumerate(files, 1):
-            result = upload_with_retries(file_path, index, total_files, proxies=proxies)
+            result = upload_with_retries(file_path, index, total_files, proxies=proxies, log_path=None)
             if result:
                 upload_results.append(result)
 
             if index < total_files:
                 print(f"{Fore.YELLOW}[>] waiting {args.wait}s..{Style.RESET_ALL}")
                 time.sleep(args.wait)
+        
+        # Create single log file for folder with format: link - filename
+        if args.log and upload_results:
+            # Get actual folder name from path (handles ./folder, /path/to/folder, .)
+            folder_path = os.path.normpath(args.path)
+            folder_name = os.path.basename(folder_path)
+            
+            # Handle case where path is '.' or ends with separator
+            if not folder_name or folder_name == '.':
+                folder_name = os.path.basename(os.getcwd())
+            
+            parent_dir = os.path.dirname(folder_path) if os.path.dirname(folder_path) else '.'
+            
+            folder_log_path = os.path.join(parent_dir, f"{folder_name}_links.txt")
+            
+            try:
+                with open(folder_log_path, 'w', encoding='utf-8') as log_file:
+                    for result in upload_results:
+                        log_file.write(f"{result['link']} - {result['filename']}\n")
+            except Exception as e:
+                print(f"{Fore.RED}[!] error saving links file: {str(e)}{Style.RESET_ALL}")
 
     else:
         print(f"{Fore.RED}[!] error: '{args.path}' invalid path{Style.RESET_ALL}")
