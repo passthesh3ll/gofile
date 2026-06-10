@@ -274,27 +274,44 @@ def parallel_upload(files, parallel, wait_time, proxies):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="upload files or folders to Gofile")
-    parser.add_argument("path", help="path to the file or folder to upload")
-    parser.add_argument("--log", action="store_true", help="save upload links to _links.txt file")
+    # Formatter che preserva i colori nell'help
+    class ColoredHelpFormatter(argparse.RawDescriptionHelpFormatter):
+        def _format_action(self, action):
+            # Mantiene i codici colore nel testo di aiuto
+            return super()._format_action(action)
+
+    parser = argparse.ArgumentParser(
+        description=f"{Fore.CYAN}Upload files or folders to Gofile{Style.RESET_ALL}",
+        formatter_class=ColoredHelpFormatter
+    )
+    
+    parser.add_argument(
+        "path", 
+        help=f"Path to the {Fore.BLUE}file or folder{Style.RESET_ALL} to upload"
+    )
+    parser.add_argument(
+        "--log", 
+        action="store_true", 
+        help=f"{Fore.GREEN}Save upload links{Style.RESET_ALL} to _links.txt file"
+    )
     parser.add_argument(
         "--wait",
         type=int,
         default=5,
-        help="seconds to wait between uploads (default: 5sec)"
+        help=f"Seconds to {Fore.YELLOW}wait between uploads{Style.RESET_ALL} (default: 5)"
     )
     parser.add_argument(
         "--proxy",
         nargs='?',
         const='socks5://127.0.0.1:9050',
         default=None,
-        help="use proxy (default if empty: socks5://127.0.0.1:9050, or specify custom proxy URL)"
+        help=f"Use {Fore.MAGENTA}proxy{Style.RESET_ALL} (default if empty: socks5://127.0.0.1:9050, or specify custom proxy URL)"
     )
     parser.add_argument(
         "--parallel",
         type=int,
         default=1,
-        help="number of parallel uploads (default: 1)"
+        help=f"Number of {Fore.CYAN}parallel uploads{Style.RESET_ALL} (default: 1)"
     )
 
     args = parser.parse_args()
